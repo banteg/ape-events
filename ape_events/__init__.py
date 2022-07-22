@@ -13,11 +13,13 @@ db = orm.Database()
 
 
 class LogQuery(db.Entity):
-    contract = orm.Required(str)
+    address = orm.Required(str)
     event_name = orm.Required(str)
     event_abi = orm.Required(orm.Json)
     last_cached_block = orm.Required(int)
     logs = orm.Set(lambda: LogCache)
+
+    orm.PrimaryKey(address, event_name)
 
 
 class LogCache(db.Entity):
@@ -37,11 +39,25 @@ class CacheLogsProvider(QueryAPI):
         db.generate_mapping(create_tables=True)
 
     def estimate_query(self, query: ContractEventQuery) -> Optional[int]:
-        print(query.dict(include={"contract": True, "event": True}))
         if not isinstance(query, ContractEventQuery):
             return None
 
-        return 100
+        with orm.db_session:
+            try:
+                db_query = LogQuery[query.contract, query.event.name]
+            except orm.ObjectNotFound:
+                db_query = LogQuery(
+                    address=query.contract,
+                    event_name=query.event.name,
+                    event_abi=query.event.dict(),
+                    last_cached_block=0,
+                )
+
+        return (
+            100
+            * (self.chain_manager.blocks.height - db_query.last_cached_block)
+            / self.provider.block_page_size
+        )
 
     def perform_query(self, query: ContractEventQuery) -> pd.DataFrame:
         if not isinstance(query, ContractEventQuery):
