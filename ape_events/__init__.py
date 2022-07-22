@@ -1,4 +1,5 @@
 import os
+import pickle
 from typing import List, Optional
 
 from ape import plugins
@@ -23,7 +24,7 @@ class LogQuery(db.Entity):
 class LogCache(db.Entity):
     _table_ = "cached_logs"
     query = orm.Required(LogQuery)
-    data = orm.Required(orm.Json)
+    data = orm.Required(bytes)
 
 
 class CacheLogsProvider(QueryAPI):
@@ -64,7 +65,7 @@ class CacheLogsProvider(QueryAPI):
         with orm.db_session:
             db_query = LogQuery[query.contract, query.event.name]
             cached_logs = [
-                ContractLog.parse_obj(log.data)
+                pickle.loads(log.data)
                 for log in orm.select(log for log in LogCache if log.query == db_query)
             ]
 
@@ -87,7 +88,7 @@ class CacheLogsProvider(QueryAPI):
                     continue
                 LogCache(
                     query=db_query,
-                    data=log.dict(),
+                    data=pickle.dumps(log),
                 )
             db_query.last_cached_block = query.stop_block - 1
 
