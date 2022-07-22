@@ -1,13 +1,10 @@
-# Add module top-level imports here
-from typing import Optional
-
-import pandas as pd
-from ape import plugins
-from ape.types import ContractLog, LogFilter
-from ape.api.query import ContractEventQuery, QueryAPI
-from pony import orm
 import os
+from typing import List, Optional
 
+from ape import plugins
+from ape.api.query import ContractEventQuery, QueryAPI
+from ape.types import ContractLog, LogFilter
+from pony import orm
 
 db = orm.Database()
 
@@ -61,7 +58,7 @@ class CacheLogsProvider(QueryAPI):
             / self.provider.block_page_size
         )
 
-    def perform_query(self, query: ContractEventQuery) -> pd.DataFrame:
+    def perform_query(self, query: ContractEventQuery) -> List[ContractLog]:
         if not isinstance(query, ContractEventQuery):
             return None
         with orm.db_session:
@@ -80,7 +77,7 @@ class CacheLogsProvider(QueryAPI):
         fetched_logs = self.provider.get_contract_logs(log_filter)
         return cached_logs + list(fetched_logs)
 
-    def update_cache(self, query: ContractEventQuery, result: pd.DataFrame):
+    def update_cache(self, query: ContractEventQuery, result: List[ContractLog]):
         if not isinstance(query, ContractEventQuery):
             return
         with orm.db_session:
