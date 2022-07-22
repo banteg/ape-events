@@ -3,7 +3,7 @@ from typing import Optional
 
 import pandas as pd
 from ape import plugins
-from ape.types import ContractLog
+from ape.types import ContractLog, LogFilter
 from ape.api.query import ContractEventQuery, QueryAPI
 from pony import orm
 import os
@@ -13,6 +13,7 @@ db = orm.Database()
 
 
 class LogQuery(db.Entity):
+    _table_ = "log_queries"
     address = orm.Required(str)
     event_name = orm.Required(str)
     event_abi = orm.Required(orm.Json)
@@ -23,6 +24,7 @@ class LogQuery(db.Entity):
 
 
 class LogCache(db.Entity):
+    _table_ = "cached_logs"
     query = orm.Required(LogQuery)
     data = orm.Required(orm.Json)
 
@@ -62,13 +64,35 @@ class CacheLogsProvider(QueryAPI):
     def perform_query(self, query: ContractEventQuery) -> pd.DataFrame:
         if not isinstance(query, ContractEventQuery):
             return None
+        with orm.db_session:
+            db_query = LogQuery[query.contract, query.event.name]
+            cached_logs = [
+                ContractLog.parse_obj(log.data)
+                for log in orm.select(log for log in LogCache if log.query == db_query)
+            ]
 
-        return ["success!"]
+        log_filter = LogFilter.from_event(
+            event=query.event,
+            addresses=[query.contract],
+            start_block=db_query.last_cached_block + 1,
+            stop_block=query.stop_block,
+        )
+        fetched_logs = self.provider.get_contract_logs(log_filter)
+        return cached_logs + list(fetched_logs)
 
     def update_cache(self, query: ContractEventQuery, result: pd.DataFrame):
         if not isinstance(query, ContractEventQuery):
             return
-        print(f"updated cache {query} with {result}")
+        with orm.db_session:
+            db_query = LogQuery[query.contract, query.event.name]
+            for log in result:
+                if log.block_number < db_query.last_cached_block:
+                    continue
+                LogCache(
+                    query=db_query,
+                    data=log.dict(),
+                )
+            db_query.last_cached_block = query.stop_block - 1
 
 
 @plugins.register(plugins.QueryPlugin)
